@@ -1,0 +1,12 @@
+{
+  "name": "viewset",
+  "version": "0.1.0",
+  "description": "",
+  "license": "MIT",
+  "devDependencies": {
+    "drizzle-orm": "^0.28.5",
+    "drizzle-zod": "^0.5.1",
+    "h3": "^1.8.0",
+    "zod": "^3.22.2"
+  }
+}
