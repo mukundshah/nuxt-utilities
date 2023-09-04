@@ -20,6 +20,9 @@ importers:
 
   packages/drizzle-formkit:
     devDependencies:
+      '@formkit/core':
+        specifier: ^1.0.0
+        version: 1.0.0
       '@formkit/vue':
         specifier: ^0.18.5
         version: 0.18.5
@@ -32,6 +35,8 @@ importers:
       zod:
         specifier: ^3.22.2
         version: 3.22.2
+
+  packages/formkit-components: {}
 
   packages/nuxt-filepond:
     devDependencies:
@@ -247,6 +252,12 @@ packages:
       '@formkit/utils': 0.18.5
     dev: true
 
+  /@formkit/core@1.0.0:
+    resolution: {integrity: sha512-rDFVwNngLcakltasYzmyYDPAYoCoakK+7h4/5V1bE1FQDabhVvJIc5EDH8U80RAKNLGS9xiQ1JK4FHGcZ3K+oQ==}
+    dependencies:
+      '@formkit/utils': 1.0.0
+    dev: true
+
   /@formkit/dev@0.18.5:
     resolution: {integrity: sha512-keQhC76DK8HeJv+yM5Ii+vYJdgvhMMk5Nn35D7qSLSj23Ji64CT5vcglBiyilW5+D9sEjXW3hdVO4ZcgGeLB/g==}
     dependencies:
@@ -303,6 +314,10 @@ packages:
 
   /@formkit/utils@0.18.5:
     resolution: {integrity: sha512-6sxNXcUKwQ1m2YoQKfaYL2l0g1t9prrRmF2pB1NaZGUWNDTu8GDUuFkfpcioXohwaHZHDSd+W6WRyXHgpaSagA==}
+    dev: true
+
+  /@formkit/utils@1.0.0:
+    resolution: {integrity: sha512-5T8PbHOajP/eJuoEeLgxA0g25nyVUZKfy2V2mW8idoph+9PT0nZUoIP+KA/PJ2mmexqtuykMT0A5knW8MiXqsw==}
     dev: true
 
   /@formkit/validation@0.18.5:

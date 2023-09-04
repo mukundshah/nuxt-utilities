@@ -4,6 +4,7 @@
   "description": "",
   "license": "MIT",
   "devDependencies": {
+    "@formkit/core": "^1.0.0",
     "@formkit/vue": "^0.18.5",
     "drizzle-orm": "^0.28.5",
     "drizzle-zod": "^0.5.1",
