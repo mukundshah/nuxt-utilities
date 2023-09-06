@@ -1,3 +1,5 @@
+// TODO: Search, Filter, Ordering, Error Handling, Auth/Permissions
+
 import { z } from "zod";
 import { getQuery, getRouterParam, readBody, eventHandler } from "h3";
 import { eq, getTableColumns, sql } from "drizzle-orm";
@@ -165,8 +167,6 @@ export function useAPIView<
 
   const _pageSize = pageSize ?? 25;
 
-  // TODO: parse filters and ordering from _event.query with zod
-
   function getEvent(event: H3Event | undefined) {
     if (event === undefined) throw new Error("event is undefined");
     return event;
@@ -197,12 +197,9 @@ export function useAPIView<
       })
       .from(model);
 
-    if (query.filters && filterFields) {
-      // TODO: parse filters with zod
-    }
+    if (query.filters && filterFields) {    }
 
     if (query.order && orderFields) {
-      // TODO: parse order with zod
       const orderingSchema = z.record(
         z.string().refine((value) => orderFields?.includes(value)),
         z.enum(["asc", "desc"])
@@ -284,7 +281,6 @@ export function useAPIView<
     const serachQuery = query.q as string;
     if (!serachQuery) return [];
 
-    // TODO: implement search
     return new Promise((resolve) => {
       setTimeout(() => {
         resolve([]);
