@@ -1,4 +1,4 @@
-// TODO: Search, Filter, Ordering, Error Handling, Auth/Permissions
+// TODO: Search, Filter, Error Handling, Auth/Permissions
 
 import { z } from "zod";
 import { getQuery, getRouterParam, readBody, eventHandler } from "h3";
@@ -10,7 +10,6 @@ import type { ZodObject } from "zod";
 import type { Column, SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { PgColumn, PgTableWithColumns } from "drizzle-orm/pg-core";
-
 
 type APIViewHandler = "list" | "create" | "retrieve" | "update" | "destroy" | "search";
 type APIViewHandlers = APIViewHandler[] | "all";
@@ -91,6 +90,7 @@ interface APIViewOptions<
   searchFields?: Array<ColumnDescriptor<Table>>;
   filterFields?: Array<ColumnDescriptor<Table>>;
   orderFields?: Array<ColumnDescriptor<Table>>;
+  defaultOrdering?: string;
 }
 
 function getOrderBySQL<Table extends PgTableWithColumns<any>>(
@@ -101,9 +101,8 @@ function getOrderBySQL<Table extends PgTableWithColumns<any>>(
   Object.keys(ordering).forEach((columnName) => {
     const column = table[columnName as ColumnDescriptor<Table>];
     const direction = ordering[columnName as ColumnDescriptor<Table>];
-    sqlChunks.push(sql`${column} ${direction}`);
+    sqlChunks.push(sql`${column} ${sql.raw(direction)}`);
   });
-
   return sql.join(sqlChunks, sql`, `);
 }
 
@@ -143,6 +142,7 @@ export function useAPIView<
     searchFields,
     filterFields,
     orderFields,
+    defaultOrdering,
   } = options;
 
   const pk = getTablePrimaryKeys(model)[0] as ColumnDescriptor<Table>;
@@ -172,9 +172,53 @@ export function useAPIView<
     return event;
   }
 
-  async function list({ schema = _schema.list as ZList }: ListOptions<ZList> = {}) {
-    if(handlers?.list) return handlers.list(getEvent(_event));
-    const results = await _db.select(fieldsToColumns(model, schema)).from(model);
+  async function list({ schema = _schema.list as ZList, event = _event as H3Event }: ListOptions<ZList> = {}) {
+    if(handlers?.list) return handlers.list(getEvent(event));
+
+    const _event = getEvent(event);
+    const query = getQuery(_event);
+
+    let dbQuery = _db
+    .select(fieldsToColumns(model, schema))
+    .from(model);
+
+    if (query.filters && filterFields) {    }
+
+    if (query.o && orderFields) {
+      const orderQueryStringSchema = z.string().regex(new RegExp(`^([-]?(${orderFields.join('|')})(?:,[-]?(${orderFields.join('|')}))*)?$`));
+      const orderQueryString = orderQueryStringSchema.parse(query.o ?? '');
+      const ordering = orderQueryString.split(',').map((part) => {
+        const cleanedPart = part.replace(/^[-]/, '');
+        const direction = part.startsWith('-') ? 'desc' : 'asc';
+        return [cleanedPart, direction] as [ColumnDescriptor<Table>, 'asc' | 'desc'];
+      }).reduce((acc, [column, direction]) => {
+        acc[column] = direction;
+        return acc;
+      }, {} as Record<ColumnDescriptor<Table>, "asc" | "desc">);
+
+      if (Object.keys(ordering).length > 0)
+        dbQuery = dbQuery.orderBy(getOrderBySQL(model, ordering));
+    }
+    else if (defaultOrdering) {
+    const columnNames = Object.keys(getTableColumns(model));
+
+
+      const orderQueryStringSchema = z.string().regex(new RegExp(`^([-]?(${columnNames.join('|')})(?:,[-]?(${columnNames.join('|')}))*)?$`));
+      const orderQueryString = orderQueryStringSchema.parse(defaultOrdering ?? '');
+      const ordering = orderQueryString.split(',').map((part) => {
+        const cleanedPart = part.replace(/^[-]/, '');
+        const direction = part.startsWith('-') ? 'desc' : 'asc';
+        return [cleanedPart, direction] as [ColumnDescriptor<Table>, 'asc' | 'desc'];
+      }).reduce((acc, [column, direction]) => {
+        acc[column] = direction;
+        return acc;
+      }, {} as Record<ColumnDescriptor<Table>, "asc" | "desc">);
+
+      if (Object.keys(ordering).length > 0)
+        dbQuery = dbQuery.orderBy(getOrderBySQL(model, ordering));
+    }
+
+    const results = await dbQuery;
     return z.array(schema).parse(results);
   }
 
@@ -188,7 +232,7 @@ export function useAPIView<
 
     const _event = getEvent(event);
     const query = getQuery(_event);
-    const page = (query.page as number) ?? 1;
+    const page = (query.p as number) ?? 1;
 
     let dbQuery = _db
       .select({
@@ -199,14 +243,36 @@ export function useAPIView<
 
     if (query.filters && filterFields) {    }
 
-    if (query.order && orderFields) {
-      const orderingSchema = z.record(
-        z.string().refine((value) => orderFields?.includes(value)),
-        z.enum(["asc", "desc"])
-      );
-      const ordering = orderingSchema.parse(query.ordering ?? {}) as Record<ColumnDescriptor<Table>, "asc" | "desc">;
-      const orderBySQL = getOrderBySQL(model, ordering);
-      if (orderBySQL) dbQuery = dbQuery.orderBy(getOrderBySQL(model, ordering));
+    if (query.o && orderFields) {
+      const orderQueryStringSchema = z.string().regex(new RegExp(`^([-]?(${orderFields.join('|')})(?:,[-]?(${orderFields.join('|')}))*)?$`));
+      const orderQueryString = orderQueryStringSchema.parse(query.o ?? '');
+      const ordering = orderQueryString.split(',').map((part) => {
+        const cleanedPart = part.replace(/^[-]/, '');
+        const direction = part.startsWith('-') ? 'desc' : 'asc';
+        return [cleanedPart, direction] as [ColumnDescriptor<Table>, 'asc' | 'desc'];
+      }).reduce((acc, [column, direction]) => {
+        acc[column] = direction;
+        return acc;
+      }, {} as Record<ColumnDescriptor<Table>, "asc" | "desc">);
+
+      if (Object.keys(ordering).length > 0)
+        dbQuery = dbQuery.orderBy(getOrderBySQL(model, ordering));
+    }
+    else if (defaultOrdering) {
+      const columnNames = Object.keys(getTableColumns(model));
+      const orderQueryStringSchema = z.string().regex(new RegExp(`^([-]?(${columnNames.join('|')})(?:,[-]?(${columnNames.join('|')}))*)?$`));
+      const orderQueryString = orderQueryStringSchema.parse(defaultOrdering ?? '');
+      const ordering = orderQueryString.split(',').map((part) => {
+        const cleanedPart = part.replace(/^[-]/, '');
+        const direction = part.startsWith('-') ? 'desc' : 'asc';
+        return [cleanedPart, direction] as [ColumnDescriptor<Table>, 'asc' | 'desc'];
+      }).reduce((acc, [column, direction]) => {
+        acc[column] = direction;
+        return acc;
+      }, {} as Record<ColumnDescriptor<Table>, "asc" | "desc">);
+
+      if (Object.keys(ordering).length > 0)
+        dbQuery = dbQuery.orderBy(getOrderBySQL(model, ordering));
     }
 
     const results = await dbQuery.limit(pageSize).offset((page - 1) * pageSize);
@@ -337,9 +403,9 @@ export function useAPIView<
   }
 
   const meta = {
-    name: model._.name,
-    _primaryKey: _primaryKey,
-    schema: _schema,
+    // name: model._.name,
+    // _primaryKey: _primaryKey,
+    // schema: _schema,
   };
 
   return {
