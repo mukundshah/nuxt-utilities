@@ -1,5 +1,9 @@
 import { getQuery } from 'ufo';
+import { sql } from 'drizzle-orm';
+
 import type { ParsedQuery } from 'ufo';
+
+// import type { SQL } from 'drizzle-orm';
 
 interface FilterParam {
   $eq?: string | number | boolean | Date | bigint
@@ -33,20 +37,63 @@ interface FilterQuery {
   }
 }
 
+/**
+ *
+ * @param value
+ * @returns string | number | boolean | null | bigint | Date
+ */
 function castValue(
   value: string,
 ): string | number | boolean | null | bigint | Date {
   if (value === '')
     return '';
-  if (value.toLowerCase() === 'true')
+
+  const logwerCaseValue = value.toLowerCase();
+  if (logwerCaseValue === 'true')
     return true;
-  if (value.toLowerCase() === 'false')
+  if (logwerCaseValue === 'false')
     return false;
-  if (value.toLowerCase() === 'null')
+  if (logwerCaseValue === 'null')
     return null;
-  if (Number.isNaN(Number(value)))
-    return value;
-  return Number(value);
+
+  const numericValue = Number(value);
+  if (!isNaN(numericValue)) {
+    if (Number.isSafeInteger(numericValue))
+      return numericValue;
+    return BigInt(value);
+  }
+
+  const dateValue = new Date(value);
+  if (!isNaN(dateValue.getTime()))
+    return dateValue;
+
+  return value;
+}
+
+function castNumberish(value: string): number | bigint | Date {
+  const numericValue = Number(value);
+  if (!isNaN(numericValue)) {
+    if (Number.isSafeInteger(numericValue))
+      return numericValue;
+    return BigInt(value);
+  }
+
+  const dateValue = new Date(value);
+  if (!isNaN(dateValue.getTime()))
+    return dateValue;
+
+  throw new Error('Not a numberish value');
+}
+
+function castArray(value: Array<string>): any[] {
+  const arr = value.map(castValue);
+  const firstElementType = typeof arr[0];
+  if (arr.every(v => typeof v === firstElementType)) {
+    // TODO: what does this do and do we need it?
+    // if (firstElementType === "number") return arr.map(Number);
+    return arr;
+  }
+  throw new Error('Not an array of the same type');
 }
 
 function decodeValue(value: string): Record<string, any> {
@@ -62,33 +109,33 @@ function decodeValue(value: string): Record<string, any> {
   const removePrefix = (prefix: string) => value.substring(prefix.length);
 
   if (startsWith('>='))
-    return { $gte: Number(removePrefix('>=')) };
+    return { $gte: castNumberish(removePrefix('>=')) };
   if (startsWith('<='))
-    return { $lte: Number(removePrefix('<=')) };
+    return { $lte: castNumberish(removePrefix('<=')) };
   if (startsWith('>'))
-    return { $gt: Number(removePrefix('>')) };
+    return { $gt: castNumberish(removePrefix('>')) };
   if (startsWith('<'))
-    return { $lt: Number(removePrefix('<')) };
+    return { $lt: castNumberish(removePrefix('<')) };
 
   // range
   if (value.includes('..')) {
-    const [start, end] = value.startsWith('!')
+    const [start, end] = startsWith('!')
       ? removePrefix('!').split('..')
       : value.split('..');
-    return value.startsWith('!')
-      ? { $nbetween: [start, end] }
-      : { $between: [start, end] };
+    return startsWith('!')
+      ? { $nbetween: castArray([start, end]) }
+      : { $between: castArray([start, end]) };
   }
 
   // array
   if (value.includes(',')) {
     if (startsWith('@>'))
-      return { $contained: removePrefix('@>').split(',') };
+      return { $contained: removePrefix('@>').split(',').map(castValue) };
     if (startsWith('@'))
       return { $contains: removePrefix('@') };
     if (startsWith('!'))
-      return { $nin: removePrefix('!').split(',') };
-    return { $in: value.split(',') };
+      return { $nin: castArray(removePrefix('!').split(',')) };
+    return { $in: castArray(value.split(',')) };
   }
 
   if (startsWith('~'))
@@ -143,7 +190,7 @@ function handleArray(values: string[]): Record<string, any> {
 function parseAndOrNot(value: string): Record<string, any> {
   const cleanValue = value.substring(1, value.length - 1);
   const tokens = cleanValue.replaceAll('|', '&');
-  const query = _getQuery(tokens);
+  const query = getQuery(tokens);
 
   const queryObject: Record<string, any> = {};
   for (const [key, value] of Object.entries(query)) {
@@ -157,55 +204,125 @@ function parseAndOrNot(value: string): Record<string, any> {
   return queryObject;
 }
 
+interface DrizzleRestFilterOptions {
+  pagination?: {
+    pageSize?: number
+  }
+  alias?: Record<string, string>
+  exclude?: string[]
+  include?: string[]
+  filter?: {
+    alias?: Record<string, string>
+    exclude?: string[]
+    include?: string[]
+    allowedOperators?: string[]
+    blockedOperators?: string[]
+  }
+  sort?: {
+    alias?: Record<string, string>
+    exclude?: string[]
+    include?: string[]
+    default?: string
+  }
+  search?: {
+    searchableFields: string[]
+  }
+}
+
 function processQuery(q: Record<string, any>): Record<string, any> {
   const { and, or, not, page, size, sort, q: searchQuery, ...restQ } = q;
 
-  const query: Record<string, any> = {};
+  const filter: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(restQ)) {
     console.log(key, value);
     if (typeof value === 'string')
-      query[key] = decodeValue(value);
+      filter[key] = decodeValue(value);
 
     else if (Array.isArray(value))
-      query[key] = handleArray(value);
+      filter[key] = handleArray(value);
   }
 
   if (and)
-    query.$and = parseAndOrNot(and);
+    filter.$and = parseAndOrNot(and);
   if (or)
-    query.$or = parseAndOrNot(or);
+    filter.$or = parseAndOrNot(or);
   if (not)
-    query.$not = parseAndOrNot(not);
+    filter.$not = parseAndOrNot(not);
 
-  return query;
+  return {
+    filter,
+    page: page ? Number(page) : 1,
+    size: size ? Number(size) : 10,
+    sort: sort || 'id',
+    searchQuery: searchQuery || '',
+  };
 }
 
-export const useRestFilter = <T extends ParsedQuery = ParsedQuery> (query: string | T) => {
-  const q = typeof query === 'string' ? getQuery(query) : query;
-  const filters = () => {
-    return {
-      sql: processQuery(q),
-    };
+function useDrizzleRestFilter(
+  queryParam: string | ParsedQuery,
+  options: DrizzleRestFilterOptions,
+) {
+  const { pagination, alias, exclude, include, filter, sort, search }
+    = options;
+
+  const filterAlias = filter?.alias ?? alias;
+  const filterExclude = filter?.exclude ?? exclude;
+  const filterInclude = filter?.include ?? include;
+  const filterAllowedOperators = filter?.allowedOperators ?? 'all';
+
+  const sortAlias = sort?.alias ?? alias;
+  const sortExclude = sort?.exclude ?? exclude;
+  const sortInclude = sort?.include ?? include;
+  const sortDefault = sort?.default ?? 'id';
+
+  const searchSearchableFields = search?.searchableFields ?? [];
+
+  const query
+    = typeof queryParam === 'string' ? getQuery(queryParam) : queryParam;
+
+  const processedQuery = processQuery(query);
+
+  const {
+    filter: filterQuery,
+    page,
+    size,
+    sort: sortQuery,
+    searchQuery,
+  } = processedQuery;
+
+  const filterSQL = () => {
+    return sql`where ${filterQuery}`;
   };
-  const sort = () => {
-    return {
-      sql: processQuery(q),
-    };
+
+  const sortSQL = () => {
+    return sql`order by ${sortQuery}`;
   };
-  const page = () => {
-    return {
-      sql: processQuery(q),
-    };
+
+  const searchSQL = () => {
+    return sql`where ${searchQuery}`;
   };
-  const size = () => {
-    return {
-      sql: processQuery(q),
-    };
+
+  const paginationSQL = () => {
+    return sql`limit ${size} offset ${(page - 1) * size}`;
   };
-  const q = () => {
-    return {
-      sql: processQuery(q),
-    };
+
+  return {
+    filter: {
+      sql: filterSQL,
+      query: filterQuery,
+    },
+    sort: {
+      sql: sortSQL,
+      query: sortQuery,
+    },
+    search: {
+      sql: searchSQL,
+      query: searchQuery,
+    },
+    pagination: {
+      sql: paginationSQL,
+      query: { page, size },
+    },
   };
-};
+}
